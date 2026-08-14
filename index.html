@@ -583,6 +583,31 @@
                 <div class="stat-card"><div class="stat-label">🌟 Viral</div><div class="stat-value" style="color:var(--accent-green);" id="statViral">0</div></div>
                 <div class="stat-card"><div class="stat-label">🔓 Free</div><div class="stat-value" style="color:var(--accent-purple);" id="statFreeRemaining">1</div></div>
             </div>
+            <!-- Payment Modal -->
+            <div id="paymentModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+                <div style="background:var(--surface); border-radius:var(--radius-xl); padding:30px; max-width:500px; width:90%; border:1px solid var(--border); position:relative; max-height:90vh; overflow-y:auto;">
+                    <button onclick="document.getElementById('paymentModal').style.display='none'" style="position:absolute; top:12px; right:16px; background:transparent; border:none; color:var(--text-tertiary); font-size:22px; cursor:pointer;">&times;</button>
+                    <h2 style="font-size:22px; margin-bottom:20px;">💳 Choose Payment Method</h2>
+                    
+                    <button id="payTelebirrBtn" style="width:100%; padding:16px; margin-bottom:12px; background:linear-gradient(135deg,#1a73e8,#0d47a1); color:white; border:none; border-radius:var(--radius-md); font-size:16px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px;">
+                        <i class="fas fa-mobile-alt"></i> Pay with Telebirr (150 ETB)
+                    </button>
+
+                    <button id="payCBEBtn" style="width:100%; padding:16px; margin-bottom:8px; background:linear-gradient(135deg,#f5a623,#e67e22); color:white; border:none; border-radius:var(--radius-md); font-size:16px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px;">
+                        <i class="fas fa-university"></i> Pay with CBE (150 ETB)
+                    </button>
+
+                    <div id="cbeForm" style="display:none; margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">
+                        <p style="font-size:14px; color:var(--text-secondary); margin-bottom:12px;">Transfer 150 ETB to CBE account <strong>1000XXXXXX</strong> and upload the screenshot below.</p>
+                        <input type="text" id="cbeTransferRef" placeholder="Transfer Reference (e.g., ET-CBE-12345)" style="width:100%; padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); margin-bottom:12px;" />
+                        <input type="file" id="cbeScreenshot" accept="image/*" style="margin-bottom:12px; display:block; color:var(--text-secondary);" />
+                        <button id="submitCBE" class="btn-primary" style="width:100%;">Submit Screenshot</button>
+                        <div id="cbeStatus" style="margin-top:12px; font-size:14px;"></div>
+                    </div>
+
+                    <div id="paymentStatusMsg" style="margin-top:12px; font-size:14px; color:var(--text-secondary);"></div>
+                </div>
+            </div>
             <button class="btn-gold" id="subscribeBtn">
                 <i class="fas fa-crown"></i> Upgrade to Premium – 150 ETB/month
             </button>
@@ -1029,6 +1054,32 @@
 
         const $ = id => document.getElementById(id);
         const toast = $('toast');
+
+        // ---------- FINGERPRINT & USER STATUS ----------
+        function getFingerprint() {
+            let fp = localStorage.getItem('ethiotrend_fingerprint');
+            if (!fp) {
+                fp = 'user_' + Date.now() + '_' + Math.random().toString(36).substring(2, 10);
+                localStorage.setItem('ethiotrend_fingerprint', fp);
+            }
+            return fp;
+        }
+
+        async function fetchUserStatus() {
+            try {
+                const fp = getFingerprint();
+                const res = await fetch(`/api/user?fingerprint=${encodeURIComponent(fp)}`);
+                const data = await res.json();
+                if (data.success) {
+                    state.isPremium = data.user.is_premium;
+                    state.analysesUsed = data.user.analyses_used || 0;
+                    state.maxFree = data.user.analyses_limit || 1;
+                    updateStatsUI();
+                }
+            } catch (e) {
+                console.warn('Could not fetch user status', e);
+            }
+        }
 
         // ================================================================
         // SANITIZE HTML — Prevents XSS
@@ -2172,6 +2223,7 @@
                 $('hashtagsContainer').innerHTML = hashtags.map(t =>
                     `<span class="hashtag-chip">${t}</span>`).join('');
 
+                // Update state with fingerprint for backend
                 state.analysesUsed++;
                 state.totalAnalyses++;
                 if (score >= 80) state.viralHits++;
@@ -2218,163 +2270,102 @@
         }
 
         // Caption Generator
-        const captionGenBtn = $('captionGenBtn');
-        const captionGenInput = $('captionGenInput');
-        const captionGenOutput = $('captionGenOutput');
-        const captionGenResults = $('captionGenResults');
-
-        captionGenBtn.addEventListener('click', async function() {
-            const input = captionGenInput.value.trim();
+        document.getElementById('captionGenBtn').addEventListener('click', async function() {
+            const input = document.getElementById('captionGenInput').value.trim();
             if (!input) { showToast('⚠️ Please enter a topic', 'error'); return; }
-            const flagged = detectFlaggedContent(input);
-            if (flagged.length) { showToast('🚫 Inappropriate language detected in your input.', 'warning'); return; }
 
             this.innerHTML = '<span class="spinner-sm"></span> AI generating...';
             this.disabled = true;
-            const trends = await updateExternalTrends();
-            const keywords = extractKeywords(input);
-            const matched = findMatchingCreators(keywords, 4);
 
-            setTimeout(() => {
-                const topic = keywords.slice(0, 2).join(' ') || input;
-                const hashtags = ['#Ethiopia', '#AddisAbaba', '#EthioTrend', '#' + topic.replace(/\s/g, '')].slice(0, 4);
-                if (trends.length) { const tag = '#' + trends[0].replace(/\s/g, '');
-                    if (!hashtags.includes(tag)) hashtags.push(tag); }
-                let ref = '';
-                if (matched.length) ref = `🔥 Like @${matched[0].username || matched[0].name} — `;
-                else if (trends.length) ref = `📰 Trending now: ${trends[0]} — `;
-
-                const captions = [
-                    `${ref}${topic} vibes in Ethiopia! 🇪🇹✨ ${hashtags.join(' ')}`,
-                    `✨ Discover the beauty of ${topic} — Ethiopian style! 🇪🇹 #${topic.replace(/\s/g, '')} ${hashtags.slice(0,2).join(' ')}`,
-                    `🎬 ${topic} like never before! Watch till the end 👀 #EthioTrend ${hashtags.slice(0,3).join(' ')}`,
-                    `💫 ${topic} — culture, tradition, and pure Ethiopian energy! #Habesha #${topic.replace(/\s/g, '')}`,
-                    `🚀 ${topic} content that will blow your mind! 🔥 #EthiopianTikTok ${hashtags.slice(0,2).join(' ')}`
-                ];
-                const shuffled = shuffleArray([...captions]);
-                const selected = shuffled.slice(0, 4);
-                let info = '';
-                if (trends.length) info = `🌐 External trends: ${trends.slice(0,3).join(', ')}`;
-
-                // SANITIZE user content
-                const sanitizedSelected = selected.map(c => sanitizeHTML(c));
-                captionGenResults.innerHTML = sanitizedSelected.map((c, i) =>
-                    `<div class="result-item"><span class="tag">#${i+1}</span> ${c}</div>`
-                ).join('') +
-                `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--text-tertiary);">
-                    📊 Based on ${matched.length ? matched.map(m=>m.name).join(', ') : 'trending creators'}${matched.length ? ` — top match: ${matched[0].name}` : ''}${info ? ' • ' + info : ''}
-                </div>`;
-                captionGenOutput.classList.add('show');
-                this.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Generate Captions';
-                this.disabled = false;
-                showToast('✨ ' + selected.length + ' captions generated', 'success');
-            }, 1200);
+            try {
+                const res = await fetch('/api/generate-caption', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ topic: input, trends: await updateExternalTrends() })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    const output = document.getElementById('captionGenOutput');
+                    const results = document.getElementById('captionGenResults');
+                    results.innerHTML = data.captions.map((c, i) =>
+                        `<div class="result-item"><span class="tag">#${i+1}</span> ${sanitizeHTML(c)}</div>`
+                    ).join('');
+                    output.classList.add('show');
+                    showToast('✨ Captions generated!', 'success');
+                } else {
+                    showToast('❌ ' + data.error, 'error');
+                }
+            } catch (e) {
+                showToast('❌ API error', 'error');
+            }
+            this.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Generate Captions';
+            this.disabled = false;
         });
 
         // Virality Predictor
-        const viralityBtn = $('viralityBtn');
-        const viralityInput = $('viralityInput');
-        const viralityOutput = $('viralityOutput');
-        const viralityResults = $('viralityResults');
-
-        viralityBtn.addEventListener('click', async function() {
-            const input = viralityInput.value.trim();
+        document.getElementById('viralityBtn').addEventListener('click', async function() {
+            const input = document.getElementById('viralityInput').value.trim();
             if (!input) { showToast('⚠️ Please describe your content', 'error'); return; }
+
             this.innerHTML = '<span class="spinner-sm"></span> AI analyzing...';
             this.disabled = true;
-            const trends = await updateExternalTrends();
-            const keywords = extractKeywords(input);
-            const matched = findMatchingCreators(keywords, 4);
 
-            setTimeout(() => {
-                const analysis = analyzeText(input, trends);
-                const score = generateViralScore(analysis);
-                const level = score >= 80 ? '🌟 High Viral Potential' : score >= 60 ? '📈 Moderate Potential' :
-                    '📉 Needs Improvement';
-                let insights = [`🎯 Viral Score: <span class="highlight">${score}%</span> — ${level}`,
-                    `📊 Quality: <span class="highlight">${analysis.quality}</span> (${analysis.wordCount} words)`,
-                    `💬 Sentiment: ${analysis.sentiment} (${analysis.sentimentScore}%)`
-                ];
-                if (analysis.hasFlagged) insights.push(
-                    `🚫 ⚠️ Inappropriate content: ${analysis.flagged.join(', ')} — revise to avoid being flagged.`
-                    );
-                if (analysis.topics.length) insights.push(`🏷️ Topics: ${analysis.topics.slice(0,4).join(', ')}`);
-                if (analysis.trendMatch > 0) insights.push(`🔥 Matches ${analysis.trendMatch} trending topics!`);
-                else if (trends.length) insights.push(`📰 Consider: ${trends.slice(0,3).join(', ')} — trending now.`);
-                if (matched.length) insights.push(
-                    `🏆 Top match: ${matched[0].name} (${matched[0].volume}) — ${matched[0].growth > 0 ? '+' : ''}${matched[0].growth}% growth`
-                    );
-                insights.push(`⏰ Best time: ${score >= 70 ? '7-9 PM EAT' : '12-2 PM EAT'}`);
-                if (score >= 70) insights.push('🚀 Strong viral potential!');
-                else if (score >= 50) insights.push('📈 Moderate. Add emojis, questions, CTA.');
-                else insights.push('💡 Needs improvement. Strengthen your hook.');
-
-                // SANITIZE insights
-                const sanitizedInsights = insights.map(i => sanitizeHTML(i));
-                viralityResults.innerHTML = sanitizedInsights.map(i =>
-                    `<div class="result-item">${i}</div>`
-                ).join('');
-                viralityOutput.classList.add('show');
-                this.innerHTML = '<i class="fas fa-chart-line"></i> Predict Virality';
-                this.disabled = false;
-                if (analysis.hasFlagged) showToast('🚫 Inappropriate language detected!', 'warning');
-                else showToast('📊 Virality score: ' + score + '%', 'success');
-            }, 1600);
+            try {
+                const res = await fetch('/api/predict-virality', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: input, trends: await updateExternalTrends() })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    const output = document.getElementById('viralityOutput');
+                    const results = document.getElementById('viralityResults');
+                    results.innerHTML = data.insights.map(i =>
+                        `<div class="result-item">${sanitizeHTML(i)}</div>`
+                    ).join('');
+                    output.classList.add('show');
+                    showToast('📊 Analysis complete!', 'success');
+                } else {
+                    showToast('❌ ' + data.error, 'error');
+                }
+            } catch (e) {
+                showToast('❌ API error', 'error');
+            }
+            this.innerHTML = '<i class="fas fa-chart-line"></i> Predict Virality';
+            this.disabled = false;
         });
 
         // Content Optimizer
-        const optimizeBtn = $('optimizeBtn');
-        const optimizeInput = $('optimizeInput');
-        const optimizeOutput = $('optimizeOutput');
-        const optimizeResults = $('optimizeResults');
-
-        optimizeBtn.addEventListener('click', async function() {
-            const input = optimizeInput.value.trim();
+        document.getElementById('optimizeBtn').addEventListener('click', async function() {
+            const input = document.getElementById('optimizeInput').value.trim();
             if (!input) { showToast('⚠️ Please paste your content', 'error'); return; }
+
             this.innerHTML = '<span class="spinner-sm"></span> AI optimizing...';
             this.disabled = true;
-            const trends = await updateExternalTrends();
-            const keywords = extractKeywords(input);
-            const matched = findMatchingCreators(keywords, 3);
 
-            setTimeout(() => {
-                const analysis = analyzeText(input, trends);
-                const tips = generateTips(analysis, input);
-                let bestCat = 'TikTok',
-                    catScore = 0;
-                for (const cat of ['tiktok', 'instagram', 'youtube']) {
-                    const creators = getTopByCategory(cat);
-                    let s = 0;
-                    for (const c of creators) {
-                        const text = (c.desc + ' ' + c.name).toLowerCase();
-                        for (const kw of keywords) { if (text.includes(kw)) s += 2; }
-                    }
-                    if (s > catScore) { catScore = s;
-                        bestCat = cat.charAt(0).toUpperCase() + cat.slice(1); }
+            try {
+                const res = await fetch('/api/optimize-content', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: input, trends: await updateExternalTrends() })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    const output = document.getElementById('optimizeOutput');
+                    const results = document.getElementById('optimizeResults');
+                    results.innerHTML = data.tips.map((t, i) =>
+                        `<div class="result-item">${i+1}. ${sanitizeHTML(t)}</div>`
+                    ).join('');
+                    output.classList.add('show');
+                    showToast('🚀 Optimization complete!', 'success');
+                } else {
+                    showToast('❌ ' + data.error, 'error');
                 }
-                let extra = '';
-                if (analysis.hasFlagged) extra =
-                    `🚫 Inappropriate content: ${analysis.flagged.join(', ')}. Revise to avoid being flagged.`;
-                else if (trends.length && analysis.trendMatch === 0) extra =
-                    `🌐 Leverage trending: ${trends.slice(0,3).join(', ')}`;
-                else if (trends.length && analysis.trendMatch > 0) extra =
-                    `🔥 Matches ${analysis.trendMatch} trending topic(s)!`;
-
-                let html = tips.map((t, i) =>
-                    `<div class="result-item">${i+1}. ${t.icon} ${sanitizeHTML(t.text)}</div>`
-                ).join('');
-                if (extra) html += `<div class="result-item">✨ ${sanitizeHTML(extra)}</div>`;
-                html +=
-                    `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--text-tertiary);">
-                    📊 Optimized for <span class="highlight">${bestCat}</span>${matched.length ? ` • Top match: ${matched[0].name}` : ''}${analysis.hasFlagged ? ' ⚠️ Flagged content' : ''}${trends.length ? ' 🌐 Trends integrated' : ''}
-                </div>`;
-                optimizeResults.innerHTML = html;
-                optimizeOutput.classList.add('show');
-                this.innerHTML = '<i class="fas fa-rocket"></i> Optimize Content';
-                this.disabled = false;
-                if (analysis.hasFlagged) showToast('🚫 Inappropriate language detected!', 'warning');
-                else showToast('🚀 Optimized for ' + bestCat, 'success');
-            }, 1400);
+            } catch (e) {
+                showToast('❌ API error', 'error');
+            }
+            this.innerHTML = '<i class="fas fa-rocket"></i> Optimize Content';
+            this.disabled = false;
         });
 
         // ================================================================
@@ -2408,36 +2399,133 @@
             }
         }
 
+        // ---------- PAYMENT LOGIC ----------
         document.getElementById('subscribeBtn').addEventListener('click', function() {
-            if (state.isPremium) { showToast('🎉 You already have Premium!', 'success'); return; }
-            this.innerHTML = '<span class="spinner-sm"></span> Processing...';
-            this.disabled = true;
-            const status = $('paymentStatus');
-            status.className = 'payment-status show info';
-            status.textContent = '⏳ Opening Telebirr... Please approve payment.';
-            status.style.display = 'block';
-            setTimeout(() => {
-                const success = Math.random() > 0.2;
-                if (success) {
-                    state.isPremium = true;
-                    state.analysesUsed = 0;
-                    updateStatsUI();
-                    status.className = 'payment-status show success';
-                    status.textContent = '✅ Payment successful! Welcome to Premium! 🎉';
-                    this.innerHTML = '<i class="fas fa-check"></i> Premium Active';
-                    this.className = 'btn-success';
-                    this.disabled = false;
-                    showToast('🎉 Welcome to Premium!', 'success');
-                } else {
-                    status.className = 'payment-status show error';
-                    status.textContent = '❌ Payment failed. Please try again.';
-                    this.innerHTML = '<i class="fas fa-crown"></i> Upgrade to Premium – 150 ETB/month';
-                    this.className = 'btn-gold';
-                    this.disabled = false;
-                    showToast('❌ Payment failed. Try again.', 'error');
-                }
-            }, 3000);
+            if (state.isPremium) {
+                showToast('🎉 You already have Premium!', 'success');
+                return;
+            }
+            document.getElementById('paymentModal').style.display = 'flex';
+            document.getElementById('cbeForm').style.display = 'none';
         });
+
+        // Telebirr
+        document.getElementById('payTelebirrBtn').addEventListener('click', async function() {
+            const btn = this;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-sm"></span> Initiating...';
+            const statusMsg = document.getElementById('paymentStatusMsg');
+            statusMsg.textContent = '';
+
+            try {
+                const phone = prompt('Enter your Telebirr phone number (e.g., 2519xxxxxxxx):', '2519');
+                if (!phone) { btn.disabled=false; btn.innerHTML='<i class="fas fa-mobile-alt"></i> Pay with Telebirr (150 ETB)'; return; }
+                const fp = getFingerprint();
+                const res = await fetch('/api/telebirr', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fingerprint: fp, phone })
+                });
+                const data = await res.json();
+                if (data.success && data.payment_url) {
+                    localStorage.setItem('telebirr_tx_ref', data.tx_ref);
+                    window.location.href = data.payment_url;
+                } else {
+                    statusMsg.textContent = '❌ ' + (data.error || 'Payment initiation failed');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-mobile-alt"></i> Pay with Telebirr (150 ETB)';
+                }
+            } catch (err) {
+                statusMsg.textContent = '❌ Error: ' + err.message;
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-mobile-alt"></i> Pay with Telebirr (150 ETB)';
+            }
+        });
+
+        // CBE – show form
+        document.getElementById('payCBEBtn').addEventListener('click', function() {
+            const form = document.getElementById('cbeForm');
+            if (form.style.display === 'none') {
+                form.style.display = 'block';
+                form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } else {
+                form.style.display = 'none';
+            }
+        });
+
+        // Submit CBE screenshot
+        document.getElementById('submitCBE').addEventListener('click', async function() {
+            const ref = document.getElementById('cbeTransferRef').value.trim();
+            const fileInput = document.getElementById('cbeScreenshot');
+            const file = fileInput.files[0];
+            const status = document.getElementById('cbeStatus');
+
+            if (!ref || !file) {
+                status.textContent = '⚠️ Please fill in reference and select screenshot.';
+                return;
+            }
+            if (!ref.startsWith('ET-CBE-')) {
+                status.textContent = '⚠️ Reference must start with ET-CBE-';
+                return;
+            }
+
+            this.disabled = true;
+            this.innerHTML = '<span class="spinner-sm"></span> Uploading...';
+
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                const imageBase64 = e.target.result;
+                try {
+                    const fp = getFingerprint();
+                    const res = await fetch('/api/cbe-upload', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ fingerprint: fp, transferRef: ref, imageBase64 })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        status.innerHTML = '✅ ' + data.message + ' <br> Admin will verify within 24 hours.';
+                        document.getElementById('cbeForm').style.display = 'none';
+                        document.getElementById('paymentModal').style.display = 'none';
+                        setTimeout(fetchUserStatus, 10000);
+                    } else {
+                        status.textContent = '❌ ' + (data.error || 'Upload failed');
+                    }
+                } catch (err) {
+                    status.textContent = '❌ Error: ' + err.message;
+                }
+                document.getElementById('submitCBE').disabled = false;
+                document.getElementById('submitCBE').innerHTML = 'Submit Screenshot';
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // Check Telebirr return (call in initApp)
+        async function checkTelebirrReturn() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('payment') === 'telebirr-success') {
+                const txRef = localStorage.getItem('telebirr_tx_ref');
+                if (txRef) {
+                    try {
+                        const res = await fetch('/api/telebirr-query', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ txRef })
+                        });
+                        const data = await res.json();
+                        if (data.success && data.status === 'paid') {
+                            showToast('🎉 Payment confirmed! Premium activated.', 'success');
+                            await fetchUserStatus();
+                        } else {
+                            showToast('⏳ Payment still processing. Check later.', 'info');
+                        }
+                    } catch (e) {
+                        showToast('❌ Could not verify payment. Contact support.', 'error');
+                    }
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                }
+            }
+        }
 
         document.getElementById('resetBtn').addEventListener('click', function() {
             if (confirm('Reset all data?')) {
@@ -2554,6 +2642,9 @@
 
             startEngagementTicker();
             startAutoRefresh();
+
+            await checkTelebirrReturn();
+            await fetchUserStatus();
 
             showToast('🔥 Welcome to EthioTrend AI — Live engagement ticker active', 'success');
         }
