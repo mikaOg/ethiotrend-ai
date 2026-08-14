@@ -1,7 +1,7 @@
 {
   "name": "ethiotrend-ai",
   "version": "1.0.0",
-  "description": "EthioTrend AI - Live trends and AI content analyzer for Ethiopian creators",
+  "description": "EthioTrend AI - Live trends and AI content analyzer",
   "main": "index.html",
   "scripts": {
     "start": "vercel dev"
