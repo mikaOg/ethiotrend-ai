@@ -4,31 +4,23 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
   try {
-    // Log the request (you can see this in Vercel logs)
-    console.log('ai-tools called with method:', req.method);
-    console.log('body:', req.body);
-
-    if (req.method !== 'POST') {
-      return res.status(405).json({ error: 'Method not allowed' });
-    }
-
     const { tool, topic, content, trends = [] } = req.body;
 
     if (!tool) {
-      return res.status(400).json({ error: 'Missing "tool"' });
+      return res.status(400).json({ error: 'Missing "tool" field. Use "caption", "virality", or "optimize".' });
     }
 
-    // Ensure GROQ_API_KEY is set
     if (!process.env.GROQ_API_KEY) {
-      console.error('GROQ_API_KEY missing');
-      return res.status(500).json({ error: 'GROQ_API_KEY environment variable missing' });
+      return res.status(500).json({ error: 'GROQ_API_KEY is not set' });
     }
-
     const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-    let result;
-
+    // --- Caption Generator ---
     if (tool === 'caption') {
       if (!topic) return res.status(400).json({ error: 'Topic required' });
       const prompt = `You are an Ethiopian social media expert. Generate 5 engaging captions for TikTok/Instagram/YouTube about "${topic}". Incorporate these trending topics if relevant: ${trends.slice(0,3).join(', ')}. Return ONLY a JSON array of 5 strings. Each caption should be short (max 80 chars) and include 2-3 hashtags.`;
@@ -47,6 +39,7 @@ module.exports = async (req, res) => {
       return res.json({ success: true, captions: captions.slice(0,5) });
     }
 
+    // --- Virality Predictor ---
     if (tool === 'virality') {
       if (!content) return res.status(400).json({ error: 'Content required' });
       const prompt = `Analyze the following content for virality potential for Ethiopian audiences on TikTok/Instagram/YouTube. Content: "${content}" Trends: ${trends.slice(0,5).join(', ')} Return a JSON object with fields: score (0-100), level (High/Moderate/Low), sentiment, quality, and a list of 4 actionable insights (string array).`;
@@ -75,6 +68,7 @@ module.exports = async (req, res) => {
       return res.json({ success: true, insights: fullInsights.slice(0,6) });
     }
 
+    // --- Content Optimizer ---
     if (tool === 'optimize') {
       if (!content) return res.status(400).json({ error: 'Content required' });
       const prompt = `Optimize the following caption for Ethiopian audiences on social media. Original: "${content}" Trends: ${trends.slice(0,5).join(', ')} Return a JSON array of 5 optimization tips (short actionable sentences).`;
@@ -93,11 +87,10 @@ module.exports = async (req, res) => {
       return res.json({ success: true, tips: tips.slice(0,5) });
     }
 
-    return res.status(400).json({ error: 'Invalid tool' });
+    return res.status(400).json({ error: 'Invalid tool. Use "caption", "virality", or "optimize".' });
 
   } catch (err) {
     console.error('AI Tools error:', err);
-    // Always return JSON
     return res.status(500).json({ error: 'Internal server error: ' + err.message });
   }
 };

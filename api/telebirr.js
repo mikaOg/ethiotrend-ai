@@ -1,5 +1,5 @@
 const axios = require('axios');
-const pool = require('../../lib/db');
+const pool = require('../lib/db');
 
 async function getFabricToken() {
   const auth = Buffer.from(`${process.env.TELEBIRR_APP_ID}:${process.env.TELEBIRR_APP_KEY}`).toString('base64');
@@ -32,7 +32,7 @@ module.exports = async (req, res) => {
       total_amount: '150',
       trans_currency: 'ETB',
       trade_type: 'InApp',
-      callback_url: `${process.env.APP_URL}/api/payment/telebirr-callback`,
+      callback_url: `${process.env.APP_URL}/api/telebirr-callback`,
       timeout_express: '30m',
       payee_identifier: phone || '251911000000',
       payee_identifier_type: '04',

@@ -19,7 +19,7 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // ----- GET /api/user?fingerprint=... -----
+  // ----- GET /api/analyze?fingerprint=... (merged user endpoint) -----
   if (req.method === 'GET' && req.query.fingerprint) {
     try {
       const { fingerprint } = req.query;
@@ -61,7 +61,6 @@ module.exports = async (req, res) => {
 
     const cleanText = text.trim().substring(0, 2000);
 
-    // Get or create user in Neon
     let userRes = await pool.query('SELECT * FROM users WHERE fingerprint = $1', [fingerprint]);
     let user = userRes.rows[0];
     if (!user) {
